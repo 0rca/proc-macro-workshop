@@ -4,65 +4,17 @@ use std::fs;
 use std::process::Command;
 use syn::*;
 
-/// Returns true if the field is optional in the original struct
-/// For now, it is hard-coded
-fn is_optional(field: &Field) -> bool {
-    match field.ty {
-        Type::Path(ref path) => match path {
-            TypePath { qself: None, path } => {
-                match path.segments.first() {
-                    Some(PathSegment { ident, .. }) => {
-                        ident.to_string() == "Option"
-                    },
-                    None => false,
-                }
-            },
-            _ => todo!(),
-        },
-        Type::Array(_) => todo!(),
-        Type::BareFn(_) => todo!(),
-        Type::Group(_) => todo!(),
-        Type::ImplTrait(_) => todo!(),
-        Type::Infer(_) => todo!(),
-        Type::Macro(_) => todo!(),
-        Type::Never(_) => todo!(),
-        Type::Paren(_) => todo!(),
-        Type::Ptr(_) => todo!(),
-        Type::Reference(_) => todo!(),
-        Type::Slice(_) => todo!(),
-        Type::TraitObject(_) => todo!(),
-        Type::Tuple(_) => todo!(),
-        Type::Verbatim(_) => todo!(),
-        _ => todo!(),
-    }
-}
-
-/// type of field that the builder will have.
-fn builder_field_type(field: &Field) -> impl ToTokens {
-    let ty = &field.ty;
-
-    if is_optional(field) {
-        quote! {
-            #ty
-        }
-    } else {
-        quote! {
-            Option<#ty>
-        }
-    }
-}
-
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder, milder, foobar))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let struct_name = &input.ident;
     let builder_name = format_ident!("{}Builder", struct_name);
 
-    let input_ts = quote! {
-        mod input {
-            #input
-        }
-    };
+    // let input_ts = quote! {
+    //     mod input {
+    //         #input
+    //     }
+    // };
 
     let fields = match &input.data {
         Data::Struct(ref data) => match data.fields {
@@ -71,6 +23,16 @@ pub fn derive(input: TokenStream) -> TokenStream {
         },
         _ => unimplemented!(),
     };
+
+    for f in fields.named.iter() {
+        let foo: String = f
+            .attrs
+            .iter()
+            .map(|attr| attr.into_token_stream().to_string())
+            .fold("- ".to_string(), |acc, attr| format!("{}, {}", acc, attr));
+
+        println!("{}", foo);
+    }
 
     // pub struct CommandBuilder {
     //     executable: Option<String>,
@@ -148,7 +110,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             } else {
                 quote! {
-                    #name: self.#name.clone().unwrap()
+                    #name: self.#name.to_owned().unwrap()
                 }
             }
         });
@@ -156,6 +118,11 @@ pub fn derive(input: TokenStream) -> TokenStream {
         quote! {
             impl #builder_name {
                 #(#setters)*
+
+                pub fn arg(&mut self, str: String) -> &mut Self {
+                    self
+                }
+
                 pub fn build(&mut self) -> Result<#struct_name, Box<dyn std::error::Error>> {
                     Ok(#struct_name {
                         #(#field_constructors),*
@@ -189,7 +156,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        #input_ts
         #command_builder
         #command_builder_impl
         #command_impl
@@ -207,4 +173,34 @@ fn save_and_format(ts: &TokenStream, path: &str) {
         .arg(path)
         .output()
         .expect("failed to format the generated code");
+}
+
+/// Returns true if the field is optional in the original struct
+/// For now, it is hard-coded
+fn is_optional(field: &Field) -> bool {
+    match field.ty {
+        Type::Path(ref path) => match path {
+            TypePath { qself: None, path } => match path.segments.first() {
+                Some(PathSegment { ident, .. }) => ident.to_string() == "Option",
+                None => false,
+            },
+            _ => todo!(),
+        },
+        _ => todo!(),
+    }
+}
+
+/// type of field that the builder will have.
+fn builder_field_type(field: &Field) -> impl ToTokens {
+    let ty = &field.ty;
+
+    if is_optional(field) {
+        quote! {
+            #ty
+        }
+    } else {
+        quote! {
+            Option<#ty>
+        }
+    }
 }

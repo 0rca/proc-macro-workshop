@@ -1,11 +1,3 @@
-mod input {
-    pub struct Command {
-        executable: String,
-        args: Vec<String>,
-        env: Vec<String>,
-        current_dir: Option<String>,
-    }
-}
 pub struct CommandBuilder {
     executable: Option<String>,
     args: Option<Vec<String>>,
@@ -29,11 +21,14 @@ impl CommandBuilder {
         self.current_dir = Some(current_dir);
         self
     }
+    pub fn arg(&mut self, str: String) -> &mut Self {
+        self
+    }
     pub fn build(&mut self) -> Result<Command, Box<dyn std::error::Error>> {
         Ok(Command {
-            executable: self.executable.clone().unwrap(),
-            args: self.args.clone().unwrap(),
-            env: self.env.clone().unwrap(),
+            executable: self.executable.to_owned().unwrap(),
+            args: self.args.to_owned().unwrap(),
+            env: self.env.to_owned().unwrap(),
             current_dir: self.current_dir.clone(),
         })
     }
