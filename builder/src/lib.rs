@@ -1,25 +1,35 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use std::fs;
 use std::process::Command;
 use syn::*;
 
-fn get_option<'a>(t: &'a Type) -> Option<(&'a Type, &'a GenericArgument)> {
+/// Represents types with one generic argument, e.g. Option<T> or Vec<T>
+struct Type1<'a> {
+    ty: &'a Type,
+    t0: &'a GenericArgument,
+}
+
+/// Returns a Type1 struct, but only when the type is an Option
+fn get_option(t: &Type) -> Option<Type1> {
     match t {
         Type::Path(TypePath { qself: None, path }) => {
             let ps = path.segments.first()?;
 
-            if "Option" == ps.ident.to_string().as_str() {
-                let type_parameter = match &ps.arguments {
+            if "Option" == ps.ident.to_string() {
+                let generic_argument = match &ps.arguments {
                     PathArguments::AngleBracketed(AngleBracketedGenericArguments {
                         args, ..
                     }) => {
                         assert!(args.len() == 1);
                         args.first().unwrap()
                     }
-                    PathArguments::Parenthesized(_) | PathArguments::None => panic!(),
+                    _ => panic!(),
                 };
-                Some((t, type_parameter))
+                Some(Type1 {
+                    ty: t,
+                    t0: generic_argument,
+                })
             } else {
                 None
             }
@@ -31,15 +41,15 @@ fn get_option<'a>(t: &'a Type) -> Option<(&'a Type, &'a GenericArgument)> {
 #[proc_macro_derive(Builder, attributes(builder, milder, foobar))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let struct_name = &input.ident;
+    let struct_name = input.ident;
     let builder_name = format_ident!("{}Builder", struct_name);
 
-    let fields = match &input.data {
-        Data::Struct(ref data) => match data.fields {
-            Fields::Named(ref fields) => fields,
-            _ => unimplemented!(),
+    let fields = match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Named(fields) => fields,
+            _ => panic!(),
         },
-        _ => unimplemented!(),
+        _ => panic!(),
     };
 
     // pub struct CommandBuilder {
@@ -51,9 +61,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let command_builder = {
         let recurse = fields.named.iter().map(|f| {
             let name = &f.ident;
-            if let Some((t, _)) = get_option(&f.ty) {
+            if let Some(Type1 { ty, .. }) = get_option(&f.ty) {
                 quote! {
-                    #name: #t
+                    #name: #ty
                 }
             } else {
                 let ty = &f.ty;
@@ -87,26 +97,21 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let command_builder_impl = {
         let setters = fields.named.iter().map(|f| {
             let name = &f.ident;
-            let ty = &f.ty;
 
-            if let Some((_, t0)) = get_option(&f.ty) {
-                quote! {
-                    fn #name(&mut self, #name: #t0) -> &mut Self {
-                        self.#name = Some(#name);
-                        self
-                    }
-                }
+            let ty = if let Some(Type1 { ty: _, t0 }) = get_option(&f.ty) {
+                t0.to_token_stream()
             } else {
-                quote! {
-                    fn #name(&mut self, #name: #ty) -> &mut Self {
-                        self.#name = Some(#name);
-                        self
-                    }
+                f.ty.to_token_stream()
+            };
+            quote! {
+                fn #name(&mut self, #name: #ty) -> &mut Self {
+                    self.#name = Some(#name);
+                    self
                 }
             }
         });
         let field_constructors = fields.named.iter().map(|f| {
-            let name = f.ident.as_ref();
+            let name = &f.ident;
 
             if let Some(_) = get_option(&f.ty) {
                 quote! {
